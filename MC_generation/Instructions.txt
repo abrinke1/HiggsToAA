@@ -1,0 +1,126 @@
+
+#############################################################
+###  Instructions for generating MC, from LHE to MiniAOD  ###
+###           Andrew Brinkerhoff, 2019.12.13              ###
+#############################################################
+
+0. Set up SCRAM_ARCH and CMSSW environment in slc6
+  * ssh -X -Y n147  ## ssh to kodiak-hep node (n147) which has slc6, rather than slc7
+  * source ~cmssoft/shrc  ## Sets up CMSSW environment on Kodiak
+  * export SCRAM_ARCH=slc6_amd64_gcc700
+
+1. Find an appropriate, recently-generated sample in DAS
+  * Go to: https://cmsweb.cern.ch/das
+  * Type: dataset dataset=/*HToSS*/RunIIAutumn18*/MINIAODSIM status=*
+  * Best HToSS sample: /ggZH_HToSSTobbbb_ZToLL_MH-125_TuneCP5_13TeV-powheg-pythia8/RunIIAutumn18MiniAOD-rp_102X_upgrade2018_realistic_v15-v1/MINIAODSIM
+  * Good HToAA sample: /NMSSM_HToAATo4Mu_M-125_M-3_TuneCP5_13TeV_pythia8/RunIIAutumn18MiniAOD-102X_upgrade2018_realistic_v15-v1/MINIAODSIM
+  * Good HToAA sample: /SUSYZHToAA_AATo4B_M-60_TuneCP5_PSweight_13TeV_madgraph_pythia8/RunIIAutumn18MiniAOD-102X_upgrade2018_realistic_v15-v1/MINIAODSIM
+
+2. Find chains in McM
+  * Go to: https://cms-pdmv.cern.ch/mcm/requests?page=-1&dataset_name=*ggZH_HToSSTobbbb_ZToLL_MH-125*&shown=127
+  * Type "Autumn18" into "PrepID" field, look for latest MiniAOD or NanoAOD entry
+  * Right-click on far right icon under "Dataset name" column ("Show chained request ...")
+  * Under "Chain", for each step (e.g. GS, DRPremix, MiniAOD, NanoAOD) right-click to open a new tab
+  * For each new tab, under "Actions" click the second icon ("Get setup command")
+  * Save each setup command as a ".sh" executable file (I'm putting them in Chains/Sample_Name/)
+  * Make these files executable: chmod 744 Chains/*/*.sh
+
+3. Figure out which CMSSW releases are needed, and get them (cmsrel CMSSW_X_Y_Z)
+  * GS      : CMSSW_10_2_3, CMSSW_10_2_16_patch1
+  * Premix  : CMSSW_10_2_5
+  * MiniAOD : CMSSW_10_2_5
+
+4. Install and run MadGraph
+  * Instructions: https://twiki.cern.ch/twiki/bin/viewauth/CMS/QuickGuideMadGraph5aMCatNLO#Quick_tutorial_on_how_to_produce
+    ## Run *outside* a CMSSW environment, do *NOT* run cmsenv
+    git clone https://github.com/cms-sw/genproductions.git genproductions
+    cd genproductions/bin/MadGraph5_aMCatNLO/
+    mkdir cards/production/13TeV/SUSYGluGluToHToAA_AToBB_AToBB_M-20
+    ## Copy in XXX_proc_card.dat, XXX_run_card.dat, XXX_customizecards.dat, and XXX_extramodels.dat into this directory
+    ## Change file names and details inside proc_card and run_card
+    ./gridpack_generation.sh XXX cards/production/13TeV/XXX
+
+5. Run one of the initial scripts (with "GS" or "LHEGS" in the name)
+  * ./Chains/X/Y_GS_Z.sh
+  * A "fragment" config file will be output to CMSSW*/src/Configuration/GenProduction/python/*fragment.py
+  * An executable "_cfg.py" file will be created locally.  Move to CMSSW_X_Y_Z/src/MC_gen/.
+  * cd CMSSW_X_Y_Z/src/MC_gen/; cmsRun X_cfg.py
+
+6. Run one of the premixing scripts (with "Premix" in the name)
+  * voms-proxy-init --voms cms --valid 168:00
+  * ./Chains/X/Y_Premix_Z.sh
+  * Two executable "_cfg.py" files will be created locally.  Move to CMSSW_10_2_5/src/MC_gen/.
+  * Replace "step1_SIM.root" in the "1_cfg.py" file with location of "GS" output ROOT file from step #4 above.
+  * cd CMSSW_10_2_5/src/MC_gen/; cmsRun X_1_cfg.py; cmsRun X_2_cfg.py
+
+7. Run one of the MiniAOD scripts (with "MiniAOD" in the name)
+  * ./Chains/X/Y_MiniAOD_Z.sh
+  * An executable "_cfg.py" file will be created locally.  Move to CMSSW_10_2_5/src/MC_gen/.
+  * Edit "fileNames" to point to output ROOT file from step #5 above.
+  * cd CMSSW_10_2_5/src/MC_gen/; cmsRun X_cfg.py
+
+8. Set up a CMSSW release to produce NanoAOD
+## From https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#How_to_check_out_the_code_and_pr
+cmsrel CMSSW_10_2_20
+cd CMSSW_10_2_20/src
+cmsenv
+git cms-init
+git cms-merge-topic cms-nanoAOD:master-102X
+git checkout -b nanoAOD cms-nanoAOD/master-102X
+git clone https://github.com/cms-nanoAOD/PhysicsTools-NanoAOD.git $CMSSW_BASE/external/$SCRAM_ARCH/data/PhysicsTools/NanoAOD/data
+git clone https://github.com/cms-nanoAOD/nanoAOD-tools.git PhysicsTools/NanoAODTools
+scram b clean
+scram b -j 6
+
+9. Create and run a NanoAOD script
+  * ## How to run NanoAOD production: https://twiki.cern.ch/twiki/bin/view/CMSPublic/WorkBookNanoAOD#Running_on_various_datasets_from
+  * ## Global tags, etc: https://twiki.cern.ch/twiki/bin/viewauth/CMS/PdmVAnalysisSummaryTable
+  * voms-proxy-init --voms cms --valid 168:00  (password: the unknown God)
+  * cmsDriver.py myNanoProdMc -s NANO --mc --eventcontent NANOAODSIM --datatier NANOAODSIM  --no_exec  --conditions 102X_upgrade2018_realistic_v20 --era Run2_2018,run2_nanoAOD_102Xv1 --customise_commands="process.add_(cms.Service('InitRootHandlers', EnableIMT = cms.untracked.bool(False)))"
+  * ## Edit myNanoProdMc_NANO.py to point to the output file from step #5 above
+  * ## Also add the line: process.MessageLogger.cerr.FwkReport.reportEvery = 1
+  * cmsRun myNanoProdMc_NANO.py
+
+  * cd PhysicsTools/NanoAOD
+  * cmsDriver.py myNanoProdData -s NANO --data --eventcontent NANOAOD --datatier NANOAOD  --no_exec  --conditions 102X_dataRun2_v12 --era Run2_2018,run2_nanoAOD_102Xv1 --customise_commands="process.add_(cms.Service('InitRootHandlers', EnableIMT = cms.untracked.bool(False)))"
+    - ## If running over 2018D, use dataRun2_Prompt_v15 instead of 102X_dataRun2_v12
+  * ## Edit myNanoProdData_NANO.py to point to a data MiniAOD file
+  * ## Also add the line: process.MessageLogger.cerr.FwkReport.reportEvery = 1
+  * cmsRun myNanoProdData_NANO.py
+
+
+
+--------------------------------------------------------------
+---  TO MODIFY UNDERLYING MC (for methods with a tarball)  ---
+--------------------------------------------------------------
+  * Open the "GS" .sh script, and find the fragment website listed after the "curl" command
+  * Navigate there, find the tarball location in "args" under "externalLHEProducer"
+  * Copy tarball to Gridpacks/, untar it (tar -xvf)
+  * Edit InputCards/X_proc_card.dat and InputCards/X_customizecards.dat to adjust production, decay modes
+  * Delete old tar file, then re-tar everything: tar -zcvf new_file_name.tar.gz *
+  * Run *ONLY* the "curl" part of the "GS" .sh script
+  * Open *GS*_fragment.py file and replace remote tarball with your new, local tarball
+  * *NOW* run the "cmsDriver" part of the "GS" .sh script, then cmsRun it, etc.
+  * Now we can continue on with steps #6, #7, #8, and #9
+
+
+---------------------------------------------------
+---  GENERATING A GGH --> 4B SAMPLE IN 2018 MC  ---
+---------------------------------------------------
+###  LHE+GS  ###
+  * Search MCM: https://cms-pdmv.cern.ch/mcm/requests?page=-1&dataset_name=*Glu*HToAA*B*&shown=127
+    - Select SUSYGluGluToHToAA_AToBB_AToTauTau_M-20_TuneCP5_PSweight_13TeV_madgraph_pythia8
+    - Under "Actions", right-click down-arrow-in-circle ("Get setup command") and copy file into a .sh script in Chains
+  * chmod 744 the script, execute, then: mv HIG-RunIIFall18wmLHEGS-02806_1_cfg.py CMSSW_10_2_15_patch2/src/MC_gen/
+  * Open Configuration/GenProduction/python/HIG-RunIIFall18wmLHEGS-02806-fragment.py here you find the gridpack
+    - scp abrinke1@lxplus.cern.ch:/cvmfs/cms.cern.ch/phys_generator/gridpacks/2017/13TeV/madgraph/V5_2.6.0/ggh01_M125_Toa01a01_MXX_Tobbtautau/ggh01_M125_Toa01a01_M20_Tobbtautau/v1/ggh01_M125_Toa01a01_M20_Tobbtautau_slc6_amd64_gcc630_CMSSW_9_3_8_tarball.tar.xz Gridpacks/
+  * Untar and edit InputCards/ggh01_M125_Toa01a01_M20_Tobbtautau_proc_card.dat as described above, re-tar into ggh01_M125_Toa01a01_M20_Tobbbb_slc6_amd64_gcc630_CMSSW_9_3_8_tarball.tar.xz
+  * Copy tar files into CMSSW_10_2_15_patch2/src/MC_gen/Gridpacks, run "curl" part of .sh script (and following steps) as described above
+  * 
+
+-------------------------------------------------------------------------
+---  REAL INSTRUCTIONS FOR GENERATING A GGH --> 4B SAMPLE IN 2018 MC  ---
+-------------------------------------------------------------------------
+###  Running MadGraph  ###
+  * Navigate to genproductions/bin/MadGraph5_aMCatNLO/
+  * cp -r cards/
